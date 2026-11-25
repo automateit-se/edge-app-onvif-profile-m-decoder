@@ -10,7 +10,7 @@ which made one counter function per counter rule.
 - Speed, object class and (optionally) class likelihood of the object that triggered the rule, as functions of their
   own, when the camera firmware sends the object with the event (seen with 9.8x).
 - The camera sends the speed in m/s; by default the app converts it to km/h (form: *Hastighet till IoT Open*).
-- Any other number in the event becomes a function too (form: *Andra värden kameran skickar*).
+- Any other number in the event becomes a function too (form: *Andra värden sensorn skickar*).
 - The event time is read as UTC whatever the edge client's time zone.
 - Listens to any vendor level (`obj/<vendor>/<serial>/onvif-ej/#`); own functions on `obj/multisensor/...` with
   `multisensor.*` meta. Analytics metadata only: no images or video.

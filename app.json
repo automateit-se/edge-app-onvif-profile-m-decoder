@@ -5,22 +5,22 @@
     "attributes": {
       "type": "checkbox",
       "name": "Funktioner per regel",
-      "description": "Utöver själva händelsen. Kräver kamerafirmware som skickar objektet med händelsen (till exempel 9.8x).",
+      "description": "Utöver själva händelsen. Kräver sensorfirmware som skickar objektet med händelsen (till exempel 9.8x).",
       "values": {
         "speed": "Hastighet",
         "class": "Objekttyp (person, bil, cykel ...)",
         "likelihood": "Sannolikhet för objekttypen",
-        "extra": "Andra värden kameran skickar"
+        "extra": "Andra värden sensorn skickar"
       },
       "default": ["speed", "class", "extra"]
     },
     "speed_output": {
       "type": "option",
       "name": "Hastighet till IoT Open",
-      "description": "Kameran skickar hastigheten i m/s. Standard: appen räknar om till km/h.",
+      "description": "Sensorn skickar hastigheten i m/s. Standard: appen räknar om till km/h.",
       "values": {
         "kmh": "km/h (räknas om från m/s)",
-        "ms": "m/s (som kameran skickar)"
+        "ms": "m/s (som sensorn skickar)"
       },
       "default": "kmh"
     }
@@ -29,7 +29,7 @@
     {
       "id": "basic",
       "title": "Inställningar",
-      "description": "Appen skapar en enhet per kamera och funktioner per regel i kameran, första gången regeln ger en händelse.",
+      "description": "Appen skapar en enhet per sensor och funktioner per regel i sensorn, första gången regeln ger en händelse.",
       "input_fields": ["attributes", "speed_output"]
     }
   ]
