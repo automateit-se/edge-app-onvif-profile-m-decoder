@@ -1,5 +1,5 @@
 -- Tests for app.lua without an edge client: run with `lua5.3 tests/test_app.lua` from the repository root.
--- The payloads follow what Bosch cameras send; all names, serial numbers and ids are made up.
+-- The payloads follow what multisensors send; all names, serial numbers and ids are made up.
 
 local failures, count = 0, 0
 local function check(name, fn)
@@ -16,8 +16,10 @@ local load_app = S.load_app
 
 local SERIAL = "11112222333344445"
 local RULE = "Gata Norr"
-local CROSSED = "obj/bosch/" .. SERIAL .. "/onvif-ej/RuleEngine/LineDetector/Crossed/&1/" .. RULE
-local BASE = "obj/bosch/" .. SERIAL .. "/" .. RULE
+local IN = "obj/bosch/" .. SERIAL .. "/onvif-ej/" -- the vendor level the tested firmware uses
+local OUT = "obj/multisensor/" .. SERIAL .. "/"
+local CROSSED = IN .. "RuleEngine/LineDetector/Crossed/&1/" .. RULE
+local BASE = OUT .. RULE
 
 -- firmware 9.8x: the object that crossed the line comes with the event
 local WITH_OBJECT = [[{ "UtcTime": "2026-11-25T14:08:36.510Z","Source":{"VideoSource":"1","Rule":"Gata Norr"},"Data":{"Object": {"Object": {"@UUID":"00000000-0000-0000-0000-000000000001","@ObjectId":166,"Appearance": {"Color": {"ColorCluster":[{"Color": {"@Z":58.31,"@Y":58.31,"@X":36.03},"Weight": "0.64"},{"Color": {"@Z":31.88,"@Y":31.88,"@X":31.88},"Weight": "0.22"}]},"Class": {"Type": {"@Likelihood":0.87,"#text":"Car"}}},"Behaviour": {"Speed": 15.94}}}}}]]
@@ -43,14 +45,15 @@ check("topics: serial, event, source and rule", function()
   eq(t.event, "RuleEngine/LineDetector/Crossed", "event")
   eq(t.source, "&1", "source")
   eq(t.rule, RULE, "rule")
-  local m = M.parse_topic("obj/bosch/" .. SERIAL .. "/onvif-ej/VideoSource/MotionAlarm/&1")
+  local m = M.parse_topic(IN .. "VideoSource/MotionAlarm/&1")
   eq(m.event, "VideoSource/MotionAlarm", "event without a rule")
   eq(m.rule, nil, "no rule")
-  eq(M.parse_topic("obj/bosch/" .. SERIAL .. "/" .. RULE), nil, "our own topics are not events")
-  eq(M.parse_topic("obj/other/x/onvif-ej/a"), nil, "other cameras")
+  eq(M.parse_topic(BASE), nil, "our own topics are not events")
+  eq(M.parse_topic("obj/acme/" .. SERIAL .. "/onvif-ej/RuleEngine/X/&1/R").rule, "R", "any vendor level")
+  eq(M.parse_topic("obj/other/x/status/a"), nil, "not an ONVIF event")
 end)
 
-check("classes, with ONVIF and Bosch names", function()
+check("classes, with ONVIF and vendor names", function()
   local M = load_app()
   eq(M.class_of("Car").value, 2, "car")
   eq(M.class_of("Human").text, "Person", "human")
@@ -67,6 +70,8 @@ check("a crossing with an object: event, speed and class", function()
   local _, _, sim = load_app()
   sim.send(CROSSED, WITH_OBJECT)
   eq(#sim.created_devices, 1, "one device")
+  eq(sim.created_devices[1].type, "multisensor", "device type")
+  eq(sim.fn(RULE).meta["multisensor.attr"], "event", "meta")
   eq(sim.created_devices[1].meta.serial, SERIAL, "device serial")
   local ev = sim.last(BASE)
   eq(ev.value, 1, "one crossing")
@@ -148,30 +153,32 @@ check("functions and devices are found again after a restart", function()
 end)
 
 check("a counter made by IoT Open's app is used again", function()
-  local dev = { id = 300, type = "bosch_camera", meta = { serial = SERIAL, name = "Bosch Camera " .. SERIAL } }
-  local old = { id = 301, type = "counter", meta = { bosch_name = RULE, name = RULE, device_id = "300", topic_read = BASE } }
+  -- the names IoT Open's app used
+  local old_topic = "obj/bosch/" .. SERIAL .. "/" .. RULE
+  local dev = { id = 300, type = "bosch_camera", meta = { serial = SERIAL, name = "Camera " .. SERIAL } }
+  local old = { id = 301, type = "counter", meta = { bosch_name = RULE, name = RULE, device_id = "300", topic_read = old_topic } }
   local _, _, sim = load_app({ devices = { dev }, functions = { old } })
   sim.send(CROSSED, WITH_OBJECT)
   eq(#sim.created_devices, 0, "same device")
-  eq(sim.last(BASE).value, 1, "on the old topic")
+  eq(sim.last(old_topic).value, 1, "on the old topic")
   eq(sim.fn(RULE .. " hastighet").meta.device_id, "300", "new functions on the old device")
   eq(#sim.created, 2, "only speed and class are new")
 end)
 
 check("counter rules publish the count", function()
   local _, _, sim = load_app()
-  local topic = "obj/bosch/" .. SERIAL .. "/onvif-ej/RuleEngine/CountAggregation/Counter/&1/Räknare"
+  local topic = IN .. "RuleEngine/CountAggregation/Counter/&1/Räknare"
   sim.send(topic, [[{"UtcTime":"2026-11-25T14:00:00Z","Source":{"Rule":"Räknare"},"Data":{"Count":"42"}}]])
-  eq(sim.last("obj/bosch/" .. SERIAL .. "/Räknare").value, 42, "count")
+  eq(sim.last(OUT .. "Räknare").value, 42, "count")
   eq(sim.fn("Räknare").type, "counter", "counter")
 end)
 
 check("state rules publish 1 and 0", function()
   local _, _, sim = load_app()
-  local topic = "obj/bosch/" .. SERIAL .. "/onvif-ej/RuleEngine/FieldDetector/ObjectsInside/&1/Infart"
+  local topic = IN .. "RuleEngine/FieldDetector/ObjectsInside/&1/Infart"
   sim.send(topic, [[{"UtcTime":"2026-11-25T14:00:00Z","Data":{"IsInside":"true"}}]])
   sim.send(topic, [[{"UtcTime":"2026-11-25T14:00:05Z","Data":{"IsInside":"false"}}]])
-  local p = sim.pubs("obj/bosch/" .. SERIAL .. "/Infart")
+  local p = sim.pubs(OUT .. "Infart")
   eq(p[1].value, 1, "inside")
   eq(p[2].value, 0, "gone")
   eq(sim.fn("Infart").meta.state_detected, "1", "state map")
@@ -179,9 +186,9 @@ end)
 
 check("events without a rule are named after the event", function()
   local _, _, sim = load_app()
-  sim.send("obj/bosch/" .. SERIAL .. "/onvif-ej/VideoSource/MotionAlarm/&1", [[{"UtcTime":"2026-11-25T14:00:00Z","Data":{"State":true}}]])
+  sim.send(IN .. "VideoSource/MotionAlarm/&1", [[{"UtcTime":"2026-11-25T14:00:00Z","Data":{"State":true}}]])
   eq(sim.fn("VideoSource/MotionAlarm").type, "detection", "named by event")
-  eq(sim.last("obj/bosch/" .. SERIAL .. "/VideoSource_MotionAlarm").value, 1, "slashes are not topic levels")
+  eq(sim.last(OUT .. "VideoSource_MotionAlarm").value, 1, "slashes are not topic levels")
 end)
 
 check("other numbers the camera adds become functions of their own", function()

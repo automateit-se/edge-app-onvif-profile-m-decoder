@@ -1,12 +1,12 @@
 {
   "name": "IQSIGHT ONVIF Profile M decoder",
   "category": "integration",
-  "short_description": "Gör Bosch-kamerornas regler till funktioner i IoT Open: händelsen, objektets hastighet och objekttyp, och andra värden kameran skickar.",
+  "short_description": "Gör en multisensors analysregler till funktioner i IoT Open: händelsen, objektets hastighet och objekttyp, och andra värden sensorn skickar. Bara metadata, ingen bild eller video.",
   "tags": [
     "iotopen-edge-app",
-    "camera",
-    "bosch",
+    "multisensor",
     "onvif",
+    "profile-m",
     "traffic",
     "integration"
   ]

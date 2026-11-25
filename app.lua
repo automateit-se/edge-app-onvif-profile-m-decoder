@@ -1,14 +1,16 @@
--- Bosch AI camera -> IoT Open.
+-- IQSIGHT ONVIF Profile M decoder: multisensor analytics metadata -> IoT Open.
 --
--- Bosch cameras (firmware 9.x) can publish their ONVIF events as JSON over MQTT, on topics like
---   obj/bosch/<serial>/onvif-ej/RuleEngine/LineDetector/Crossed/&1/<rule name>
--- This app turns every rule into IoT Open functions on one device per camera:
+-- A multisensor (a camera with analytics) can publish its ONVIF events as JSON over MQTT, on topics like
+--   obj/<vendor>/<serial>/onvif-ej/RuleEngine/LineDetector/Crossed/&1/<rule name>
+-- Only analytics metadata is used: no images or video. This app turns every rule into IoT Open functions on one
+-- device per multisensor:
 --   <rule>              the event itself: the count (counter rules), 1/0 (state rules) or 1 per event
 --   <rule> hastighet    the speed of the object that triggered the rule (the camera sends m/s; km/h by default)
 --   <rule> objekttyp    the class of that object (person, car, bike ...), the name in msg
 --   <rule> sannolikhet  how sure the camera is of the class (%), off by default
 --   <rule> <attribute>  any other number the camera adds to the event (new firmware, other rules)
--- Functions made by IoT Open's edge-app-bosch-ai-sensor (type counter, meta bosch_name) are found and used again.
+-- Devices and counter functions made by IoT Open's edge-app-bosch-ai-sensor (device type bosch_camera, function
+-- meta bosch_name) are found and used again; those names are kept only for that.
 
 local M = {}
 
@@ -104,7 +106,7 @@ end
 --- The parts of a camera topic, or nil when it is not an ONVIF event from a camera.
 function M.parse_topic(topic)
   local p = M.split(topic, "/")
-  if p[1] ~= "obj" or p[2] ~= "bosch" or p[4] ~= "onvif-ej" or not p[5] then return nil end
+  if p[1] ~= "obj" or p[4] ~= "onvif-ej" or not p[5] then return nil end
   local amp
   for i = 5, #p do if p[i]:sub(1, 1) == "&" then amp = i break end end
   local event = table.concat(p, "/", 5, (amp or #p + 1) - 1)
@@ -160,6 +162,9 @@ end
 -- ---- devices and functions -----------------------------------------------------------------------------------------
 
 local devices, functions, failed = {}, {}, {}
+
+-- what IoT Open's edge-app-bosch-ai-sensor named its device type and function meta, to find them again
+local LEGACY = { device = "bosch_camera", name = "bosch_name" }
 local RETRY_S = 60
 
 local function first(list) if type(list) == "table" then return list[1] end end
@@ -168,12 +173,12 @@ local function device_for(serial)
   if devices[serial] then return devices[serial] end
   local d
   for _, x in ipairs(lynx.getDevices() or {}) do
-    if x.type == "bosch_camera" and x.meta and x.meta.serial == serial then d = x break end
+    if (x.type == "multisensor" or x.type == LEGACY.device) and x.meta and x.meta.serial == serial then d = x break end
   end
   if not d then
-    d = lynx.createDevice({ type = "bosch_camera", installation_id = app and app.installation_id or nil,
-      meta = { serial = serial, name = "Bosch Camera " .. serial } })
-    log.i("created device for camera %s", serial)
+    d = lynx.createDevice({ type = "multisensor", installation_id = app and app.installation_id or nil,
+      meta = { serial = serial, name = "Multisensor " .. serial } })
+    log.i("created device for multisensor %s", serial)
   end
   devices[serial] = d
   return d
@@ -217,16 +222,16 @@ local function function_for(ev, attr, kind)
   local now = os.time()
   if failed[key] and now - failed[key] < RETRY_S then return nil end
   local dev = device_for(ev.serial)
-  local fn = first(lynx.getFunctions({ ["bosch.serial"] = ev.serial, ["bosch.rule"] = ev.name, ["bosch.attr"] = attr }))
+  local fn = first(lynx.getFunctions({ ["multisensor.serial"] = ev.serial, ["multisensor.rule"] = ev.name, ["multisensor.attr"] = attr }))
   if not fn and attr == "event" then
-    -- made by IoT Open's edge-app-bosch-ai-sensor
-    fn = first(lynx.getFunctions({ type = "counter", bosch_name = ev.name, device_id = tostring(dev.id) }))
+    -- made by IoT Open's app
+    fn = first(lynx.getFunctions({ type = "counter", [LEGACY.name] = ev.name, device_id = tostring(dev.id) }))
   end
   if not fn then
-    local base = "obj/bosch/" .. ev.serial .. "/" .. level(ev.name)
+    local base = "obj/multisensor/" .. ev.serial .. "/" .. level(ev.name)
     local meta = {
-      device_id = tostring(dev.id), bosch_name = ev.name,
-      ["bosch.serial"] = ev.serial, ["bosch.rule"] = ev.name, ["bosch.attr"] = attr, ["bosch.event"] = ev.event,
+      device_id = tostring(dev.id),
+      ["multisensor.serial"] = ev.serial, ["multisensor.rule"] = ev.name, ["multisensor.attr"] = attr, ["multisensor.event"] = ev.event,
     }
     local ftype
     if attr == "event" then
@@ -311,7 +316,7 @@ function M.reset() devices, functions, failed = {}, {}, {} end
 
 -- ---- the edge client -----------------------------------------------------------------------------------------------
 
-local TOPIC = "obj/bosch/+/onvif-ej/#"
+local TOPIC = "obj/+/+/onvif-ej/#" -- any vendor level
 
 function onStart()
   mq:sub(TOPIC, 0)
@@ -322,4 +327,4 @@ function onStart()
   log.i("started, listening on %s", TOPIC)
 end
 
-if BOSCH_TEST then return M end
+if MULTISENSOR_TEST then return M end

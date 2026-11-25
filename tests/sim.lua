@@ -136,7 +136,7 @@ function S.load_app(opts)
   local function logger(level) return function(f, ...) sim.logs[#sim.logs + 1] = level .. " " .. string.format(f, ...) end end
   local os_fake = setmetatable({ time = function() return sim.clock end }, { __index = os })
   local env = setmetatable({
-    BOSCH_TEST = true,
+    MULTISENSOR_TEST = true,
     cfg = opts.cfg or {},
     app = { id = 5, installation_id = 1001, name = "App" },
     json = S.json, lynx = lynx, mq = mq, os = os_fake,
@@ -145,7 +145,7 @@ function S.load_app(opts)
   local M = assert(loadfile("app.lua", "t", env))()
   env.onStart()
   function sim.send(topic, payload)
-    local h = sim.handlers["obj/bosch/+/onvif-ej/#"]
+    local h = sim.handlers["obj/+/+/onvif-ej/#"]
     assert(h, "not bound")
     h(topic, payload)
   end
