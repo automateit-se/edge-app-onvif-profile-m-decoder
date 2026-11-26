@@ -36,8 +36,23 @@ One device per multisensor (type `multisensor`, meta `serial`, name *Multisensor
 | *&lt;rule&gt; sannolikhet* | `probability` | `.../<rule>/likelihood` | % how sure the camera is of the class (off by default) |
 | *&lt;rule&gt; &lt;path&gt;* | `value` | `.../<rule>/<path>` | any other number in the event, e.g. `Object.Behaviour.Direction.Heading` |
 
-Colours, bounding boxes, shapes and ids are left out: they describe one object, not a measurement. Events without a
-rule (e.g. `VideoSource/MotionAlarm`) are named after the event. The timestamp is the camera's time (`UtcTime`).
+These come only when chosen in the form (all off by default), and only from rules whose events carry them:
+
+| Function | Type | Topic | Value |
+|---|---|---|---|
+| *&lt;rule&gt; latitud*, *&lt;rule&gt; longitud* | `latitude`, `longitude` | `.../<rule>/latitude`, `/longitude` | where the object was, in degrees (IVA Pro Perimeter or Traffic in a 3D tracking mode, with the camera's position set); 0,0 is skipped |
+| *&lt;rule&gt; färg* | `color` | `.../<rule>/color` | the heaviest colour cluster as a number, with `state_<colour>`/`text_<colour>` meta (1 black, 2 white, 3 grey, 4 red, 5 orange, 6 yellow, 7 green, 8 blue, 9 purple, 10 brown); every cluster in `msg`, e.g. `Svart: #243a3a 64 %, #202020 22 %` |
+| *&lt;rule&gt; hjälm*, *&lt;rule&gt; väst* | `ppe` | `.../<rule>/helmet`, `/vest` | 1/0 per person (IVA Pro PPE); the kind of helmet in `msg`; nothing when the camera does not say |
+| *&lt;rule&gt; registreringsnummer* | `license_plate` | `.../<rule>/plate` | 1 per plate read; plate, country, make and model and the likelihood in `msg`, e.g. `ABC 123 SE examplebrand x1 92 %` (IVA Pro License Plate Recognition); the plate also leads the event's `msg` |
+
+The colour is named from what the camera sees, light and shade included: a dark car in shade may come out black. The
+camera's X, Y, Z are read as red, green and blue (0-255), which fits the examples in Bosch's MQTT whitepaper for
+firmware 9.80. A licence plate is personal data: choose it only where its processing has a legal basis. The vehicle
+class from a plate read is used for *&lt;rule&gt; objekttyp* whether or not plates are chosen.
+
+Not used: snapshots (Base64 images; the app handles metadata only), the object id and UUID, bounding boxes and shapes,
+and the IVA Pro Appearance attributes of people (gender, hair, clothes, glasses, bags). Events without a rule (e.g.
+`VideoSource/MotionAlarm`) are named after the event. The timestamp is the camera's time (`UtcTime`).
 
 Every function has the meta fields `multisensor.serial`, `multisensor.rule`, `multisensor.attr` and
 `multisensor.event`, which let the app find it again after a restart. The functions and the device can be renamed
@@ -51,7 +66,7 @@ only reason the word remains in the code.
 
 | Setting | Default | |
 |---|---|---|
-| Funktioner per regel (`attributes`) | speed, class, other values | which functions to create besides the event |
+| Funktioner per regel (`attributes`) | speed, class, other values | which functions to create besides the event: `speed`, `class`, `likelihood`, `geo`, `color`, `ppe`, `lpr`, `extra` |
 | Hastighet till IoT Open (`speed_output`) | km/h | `kmh`: the app converts the camera's m/s to km/h (× 3.6); `ms`: m/s as the camera sends it |
 
 The camera sends the speed in m/s: the IQSIGHT MetaDataCollector Integration Guide gives the object speed

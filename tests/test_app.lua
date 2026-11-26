@@ -200,6 +200,86 @@ check("other numbers the camera adds become functions of their own", function()
   eq(f.meta.topic_read, BASE .. "/object_behaviour_direction_heading", "topic")
 end)
 
+-- ---- optional metadata ---------------------------------------------------------------------------------------------
+
+-- IVA Pro Traffic in a 3D tracking mode: the position comes in Appearance (made-up coordinates)
+local WITH_GEO = [[{"UtcTime":"2026-11-25T14:16:42.920Z","Source":{"VideoSource":"1","Rule":"Gata Norr"},"Data":{"Object":{"Object":{"@ObjectId":726,"Appearance":{"Class":{"Type":{"@Likelihood":0.85,"#text":"Person"}},"GeoLocation":{"@elevation":"0.00","@lat":"59.12345678","@lon":"17.12345678"}},"Behaviour":{"Speed":1.2}}}}}]]
+-- IVA Pro PPE
+local WITH_PPE = [[{"UtcTime":"2026-11-25T11:30:31.109Z","Source":{"VideoSource":"1","Rule":"Gata Norr"},"Data":{"Object":{"Object":{"@ObjectId":37,"Appearance":{"Class":{"Type":{"@Likelihood":0.95,"#text":"Person"}},"HumanFace":{"Accessory":{"Helmet":{"Wear":"true","Subtype":"ConstructionCap"}}},"HumanBody":{"Clothing":{"Tops":{"Style":"Vest"}}}}}}}}]]
+-- IVA Pro License Plate Recognition (a made-up plate)
+local LPR_TOPIC = IN .. "RuleEngine/Recognition/LicensePlate/&1/Skylt"
+local WITH_PLATE = [[{"UtcTime":"2026-11-25T06:45:56.454Z","Source":{"VideoSource":"1","Rule":"Skylt"},"Data":{"Likelihood":"0.92","LicensePlateInfo":{"LicensePlateInfo":{"PlateNumber":{"@Likelihood":0.92,"#text":"ABC 123"},"PlateType":{"@Likelihood":0.92,"#text":"Normal"},"CountryCode":{"@Likelihood":0.99,"#text":"SE"}}},"VehicleInfo":{"VehicleInfo":{"Type":{"@Likelihood":1,"#text":"Car"},"Brand":{"@Likelihood":1,"#text":"examplebrand"},"Model":{"@Likelihood":1,"#text":"x1"}}}}}]]
+
+check("colour names", function()
+  local M = load_app()
+  eq(M.color_of(36, 58, 58).text, "Svart", "very dark")
+  eq(M.color_of(240, 240, 240).text, "Vit", "white")
+  eq(M.color_of(128, 128, 128).text, "Grå", "grey")
+  eq(M.color_of(200, 30, 30).text, "Röd", "red")
+  eq(M.color_of(30, 60, 200).text, "Blå", "blue")
+  eq(M.color_of(40, 160, 60).text, "Grön", "green")
+  eq(M.color_of(230, 210, 40).text, "Gul", "yellow")
+  eq(M.color_of(120, 70, 30).text, "Brun", "brown")
+  eq(M.hex(36.03, 58.31, 58.31), "#243a3a", "hex")
+end)
+
+check("optional metadata is off by default", function()
+  local _, _, sim = load_app()
+  sim.send(CROSSED, WITH_GEO)
+  sim.send(CROSSED, WITH_OBJECT)
+  sim.send(CROSSED, WITH_PPE)
+  sim.send(LPR_TOPIC, WITH_PLATE)
+  for _, n in ipairs({ " latitud", " longitud", " färg", " hjälm", " väst" }) do eq(sim.fn(RULE .. n), nil, n) end
+  eq(sim.fn("Skylt registreringsnummer"), nil, "plate")
+  eq(sim.last(OUT .. "Skylt").msg, "Car", "no plate in msg")
+  eq(sim.last(OUT .. "Skylt/class").value, 2, "the vehicle class is used")
+end)
+
+check("position when chosen", function()
+  local _, _, sim = load_app({ cfg = { attributes = { "geo" } } })
+  sim.send(CROSSED, WITH_GEO)
+  eq(sim.last(BASE .. "/latitude").value, 59.12345678, "latitude")
+  eq(sim.last(BASE .. "/longitude").value, 17.12345678, "longitude")
+  eq(sim.fn(RULE .. " latitud").meta.unit, "°", "unit")
+  local n = #sim.published
+  sim.send(CROSSED, (WITH_GEO:gsub("59%.12345678", "0"):gsub("17%.12345678", "0")))
+  eq(#sim.published, n + 1, "0,0 is no position: only the event")
+end)
+
+check("colour when chosen", function()
+  local _, _, sim = load_app({ cfg = { attributes = { "color" } } })
+  sim.send(CROSSED, WITH_OBJECT)
+  local c = sim.last(BASE .. "/color")
+  eq(c.value, 1, "dark")
+  eq(c.msg, "Svart: #243a3a 64 %, #202020 22 %", "all colours, heaviest first")
+  eq(sim.fn(RULE .. " färg").meta.text_black, "Svart", "colour map")
+end)
+
+check("helmet and vest when chosen", function()
+  local _, _, sim = load_app({ cfg = { attributes = { "ppe" } } })
+  sim.send(CROSSED, WITH_PPE)
+  eq(sim.last(BASE .. "/helmet").value, 1, "helmet")
+  eq(sim.last(BASE .. "/helmet").msg, "ConstructionCap", "kind of helmet")
+  eq(sim.last(BASE .. "/vest").value, 1, "vest")
+  sim.send(CROSSED, (WITH_PPE:gsub('"true"', '"false"'):gsub('"Vest"', '"Shirt"')))
+  eq(sim.last(BASE .. "/helmet").value, 0, "no helmet")
+  eq(sim.last(BASE .. "/vest").value, 0, "no vest")
+  local n = #sim.published
+  sim.send(CROSSED, WITH_OBJECT)
+  eq(sim.last(BASE .. "/vest").value, 0, "nothing said, nothing published")
+  assert(#sim.published > n, "the event still")
+end)
+
+check("licence plates when chosen", function()
+  local _, _, sim = load_app({ cfg = { attributes = { "lpr", "class" } } })
+  sim.send(LPR_TOPIC, WITH_PLATE)
+  local p = sim.last(OUT .. "Skylt/plate")
+  eq(p.value, 1, "one read")
+  eq(p.msg, "ABC 123 SE examplebrand x1 92 %", "plate in msg")
+  eq(sim.last(OUT .. "Skylt").msg, "ABC 123 Car", "event msg")
+  eq(sim.fn("Skylt registreringsnummer").type, "license_plate", "type")
+end)
+
 check("broken JSON is logged, not thrown", function()
   local _, _, sim = load_app()
   sim.send(CROSSED, "{not json")

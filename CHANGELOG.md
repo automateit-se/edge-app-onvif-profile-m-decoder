@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0
+
+New choices in *Funktioner per regel*, all off by default:
+
+- Position (`geo`): latitude and longitude of the object, from IVA Pro Perimeter or Traffic in a 3D tracking mode.
+- Colour (`color`): the heaviest colour cluster as a colour number, all clusters as hex in `msg`.
+- Helmet and vest (`ppe`): 1/0 per person, from IVA Pro PPE.
+- Licence plates (`lpr`): 1 per plate read with the plate, country, make and model in `msg`, from IVA Pro License Plate
+  Recognition. The vehicle class of a plate read now fills the object class.
+
 ## 0.1.0
 
 First version, based on [IoTOpen/edge-app-bosch-ai-sensor](https://github.com/IoTOpen/edge-app-bosch-ai-sensor),

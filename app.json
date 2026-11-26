@@ -5,11 +5,15 @@
     "attributes": {
       "type": "checkbox",
       "name": "Funktioner per regel",
-      "description": "Utöver själva händelsen. Kräver sensorfirmware som skickar objektet med händelsen (till exempel 9.8x).",
+      "description": "Utöver själva händelsen. Kräver sensorfirmware som skickar objektet med händelsen (till exempel 9.8x). Registreringsnummer är personuppgifter: välj dem bara när behandlingen har stöd.",
       "values": {
         "speed": "Hastighet",
         "class": "Objekttyp (person, bil, cykel ...)",
         "likelihood": "Sannolikhet för objekttypen",
+        "geo": "Position, latitud och longitud (IVA Pro Traffic/Perimeter i 3D-läge)",
+        "color": "Objektets färg",
+        "ppe": "Hjälm och väst (IVA Pro PPE)",
+        "lpr": "Registreringsnummer (IVA Pro License Plate Recognition)",
         "extra": "Andra värden sensorn skickar"
       },
       "default": ["speed", "class", "extra"]

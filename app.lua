@@ -9,6 +9,11 @@
 --   <rule> objekttyp    the class of that object (person, car, bike ...), the name in msg
 --   <rule> sannolikhet  how sure the camera is of the class (%), off by default
 --   <rule> <attribute>  any other number the camera adds to the event (new firmware, other rules)
+-- and, when chosen in the form (all off by default):
+--   <rule> latitud, <rule> longitud   where the object was (IVA Pro Perimeter/Traffic in a 3D tracking mode)
+--   <rule> färg                       the dominant colour of the object, all colours in msg
+--   <rule> hjälm, <rule> väst         1/0 per person (IVA Pro PPE)
+--   <rule> registreringsnummer        1 per plate read, the plate in msg (IVA Pro License Plate Recognition)
 -- Devices and counter functions made by IoT Open's edge-app-bosch-ai-sensor (device type bosch_camera, function
 -- meta bosch_name) are found and used again; those names are kept only for that.
 
@@ -51,6 +56,23 @@ end
 local function bool(v)
   if v == true or v == "true" or v == 1 or v == "1" then return true end
   if v == false or v == "false" or v == 0 or v == "0" then return false end
+  return nil
+end
+
+--- t[k1][k2]... or nil when a step is missing.
+local function get(t, ...)
+  for _, k in ipairs({ ... }) do
+    if type(t) ~= "table" then return nil end
+    t = t[k]
+  end
+  return t
+end
+
+--- The text of an ONVIF value: "Car" or { "@Likelihood": 1, "#text": "Car" }.
+local function text(v)
+  if type(v) == "table" then v = v["#text"] end
+  if type(v) == "string" and v ~= "" then return v end
+  if type(v) == "number" then return tostring(v) end
   return nil
 end
 
@@ -101,6 +123,47 @@ function M.class_of(name)
   return M.CLASSES[#M.CLASSES]
 end
 
+-- ---- colours -------------------------------------------------------------------------------------------------------
+
+M.COLORS = {
+  { key = "black", value = 1, text = "Svart" },
+  { key = "white", value = 2, text = "Vit" },
+  { key = "grey", value = 3, text = "Grå" },
+  { key = "red", value = 4, text = "Röd" },
+  { key = "orange", value = 5, text = "Orange" },
+  { key = "yellow", value = 6, text = "Gul" },
+  { key = "green", value = 7, text = "Grön" },
+  { key = "blue", value = 8, text = "Blå" },
+  { key = "purple", value = 9, text = "Lila" },
+  { key = "brown", value = 10, text = "Brun" },
+}
+local COLOR = {}
+for _, c in ipairs(M.COLORS) do COLOR[c.key] = c end
+
+--- A colour name for red, green and blue (0-255). It names what the sensor sees, light and shade included.
+function M.color_of(r, g, b)
+  local mx, mn = math.max(r, g, b), math.min(r, g, b)
+  local v = mx / 255
+  local s = mx > 0 and (mx - mn) / mx or 0
+  if v < 0.25 then return COLOR.black end
+  if s < 0.2 then return v > 0.75 and COLOR.white or COLOR.grey end
+  local d, h = mx - mn, 0
+  if mx == r then h = 60 * (((g - b) / d) % 6)
+  elseif mx == g then h = 60 * ((b - r) / d + 2)
+  else h = 60 * ((r - g) / d + 4) end
+  if h < 15 or h >= 345 then return COLOR.red end
+  if h < 45 then return v < 0.6 and COLOR.brown or COLOR.orange end
+  if h < 70 then return COLOR.yellow end
+  if h < 165 then return COLOR.green end
+  if h < 260 then return COLOR.blue end
+  return COLOR.purple
+end
+
+function M.hex(r, g, b)
+  local function c(x) return math.max(0, math.min(255, math.floor(x + 0.5))) end
+  return string.format("#%02x%02x%02x", c(r), c(g), c(b))
+end
+
 -- ---- parsing -------------------------------------------------------------------------------------------------------
 
 --- The parts of a camera topic, or nil when it is not an ONVIF event from a camera.
@@ -139,6 +202,55 @@ function M.extract(data)
       end
     end
     if type(obj.Behaviour) == "table" then out.speed = num(obj.Behaviour.Speed) end
+    local ap = type(obj.Appearance) == "table" and obj.Appearance or {}
+    -- where: in Appearance in the firmware 9.80 examples, also looked for on the object itself
+    local geo = ap.GeoLocation or obj.GeoLocation
+    if type(geo) == "table" then
+      local lat, lon = num(geo["@lat"] or geo.lat), num(geo["@lon"] or geo.lon)
+      if lat and lon and not (lat == 0 and lon == 0) then
+        out.geo = { lat = lat, lon = lon, elevation = num(geo["@elevation"] or geo.elevation) }
+      end
+    end
+    -- colours: X, Y, Z are red, green, blue (0-255); one cluster or a list, the heaviest first
+    local cc = get(ap, "Color", "ColorCluster")
+    if type(cc) == "table" then
+      if cc[1] == nil then cc = { cc } end
+      local list = {}
+      for i, c in ipairs(cc) do
+        local col = get(c, "Color")
+        local r, g, b = num(get(col, "@X")), num(get(col, "@Y")), num(get(col, "@Z"))
+        if r and g and b then list[#list + 1] = { r = r, g = g, b = b, weight = num(get(c, "Weight")), i = i } end
+      end
+      table.sort(list, function(a, b)
+        if (a.weight or 0) ~= (b.weight or 0) then return (a.weight or 0) > (b.weight or 0) end
+        return a.i < b.i
+      end)
+      if #list > 0 then out.colors = list end
+    end
+    -- personal protective equipment (IVA Pro PPE): only what the camera states; nothing is guessed
+    local helmet = get(ap, "HumanFace", "Accessory", "Helmet")
+    local vest = get(ap, "HumanBody", "Clothing", "Tops", "Style")
+    if type(helmet) == "table" or type(vest) == "string" then
+      out.ppe = { helmet = bool(get(helmet, "Wear")), helmet_type = text(get(helmet, "Subtype")) }
+      if type(vest) == "string" then out.ppe.vest = vest:lower() == "vest" end
+    end
+  end
+  -- licence plates (IVA Pro License Plate Recognition): not an object but plate and vehicle info
+  local lp = get(data, "LicensePlateInfo", "LicensePlateInfo") or data.LicensePlateInfo
+  if type(lp) == "table" and text(lp.PlateNumber) then
+    out.plate = {
+      number = text(lp.PlateNumber), country = text(lp.CountryCode), type = text(lp.PlateType),
+      issuer = text(lp.IssuingEntity),
+      likelihood = num(get(lp, "PlateNumber", "@Likelihood")) or num(data.Likelihood),
+    }
+    local vi = get(data, "VehicleInfo", "VehicleInfo") or data.VehicleInfo
+    if type(vi) == "table" then
+      out.plate.brand, out.plate.model = text(vi.Brand), text(vi.Model)
+      if not out.class then
+        out.class = text(vi.Type)
+        out.likelihood = num(get(vi, "Type", "@Likelihood"))
+      end
+    end
   end
   -- any other number: a path of plain keys, no attributes (@...) and nothing that only describes the object
   local used = { Count = true, State = true, IsInside = true, Speed = true }
@@ -188,19 +300,28 @@ end
 local function speed_unit() return setting("speed_output", "kmh") == "ms" and "m/s" or "km/h" end
 M.speed_unit = speed_unit
 
-local ATTR = {
-  speed = { suffix = " hastighet", type = "speed", meta = {} },
-  likelihood = { suffix = " sannolikhet", type = "probability", meta = { unit = "%", format = "%d %%" } },
-}
-
-local function class_meta()
+--- state_<key>/text_<key> meta, so a dashboard shows the text for each value.
+local function state_meta(list)
   local m = {}
-  for _, c in ipairs(M.CLASSES) do
+  for _, c in ipairs(list) do
     m["state_" .. c.key] = tostring(c.value)
     m["text_" .. c.key] = c.text
   end
   return m
 end
+local function class_meta() return state_meta(M.CLASSES) end
+local YES_NO = state_meta({ { key = "yes", value = 1, text = "Ja" }, { key = "no", value = 0, text = "Nej" } })
+
+local ATTR = {
+  speed = { suffix = " hastighet", type = "speed", meta = {} },
+  likelihood = { suffix = " sannolikhet", type = "probability", meta = { unit = "%", format = "%d %%" } },
+  latitude = { suffix = " latitud", type = "latitude", meta = { unit = "°", format = "%.6f" } },
+  longitude = { suffix = " longitud", type = "longitude", meta = { unit = "°", format = "%.6f" } },
+  color = { suffix = " färg", type = "color", meta = state_meta(M.COLORS) },
+  helmet = { suffix = " hjälm", type = "ppe", meta = YES_NO },
+  vest = { suffix = " väst", type = "ppe", meta = YES_NO },
+  plate = { suffix = " registreringsnummer", type = "license_plate", meta = { format = "%d" } },
+}
 
 --- A speed function made with the other unit gets the unit of the form (the app restarts when the form changes).
 local function fit_unit(fn)
@@ -298,6 +419,8 @@ function M.handle(topic, payload)
   if x.count then kind, value = "count", x.count
   elseif x.state ~= nil then kind, value = "state", (x.state and 1 or 0) end
   local words = {}
+  local plate = enabled("lpr") and x.plate or nil -- personal data: only when chosen
+  if plate then words[#words + 1] = plate.number end
   if cls then words[#words + 1] = x.class end
   if speed then words[#words + 1] = string.format("%.1f %s", speed, unit) end
   publish(function_for(ev, "event", kind), value, ts, table.concat(words, " "))
@@ -306,6 +429,30 @@ function M.handle(topic, payload)
   if cls and enabled("class") then publish(function_for(ev, "class"), cls.value, ts, x.class) end
   if x.likelihood and cls and enabled("likelihood") then
     publish(function_for(ev, "likelihood"), math.floor(x.likelihood * 100 + 0.5), ts, x.class)
+  end
+  if x.geo and enabled("geo") then
+    publish(function_for(ev, "latitude"), x.geo.lat, ts, x.class)
+    publish(function_for(ev, "longitude"), x.geo.lon, ts, x.class)
+  end
+  if x.colors and enabled("color") then
+    local top = x.colors[1]
+    local parts = {}
+    for _, c in ipairs(x.colors) do
+      parts[#parts + 1] = M.hex(c.r, c.g, c.b) .. (c.weight and string.format(" %d %%", math.floor(c.weight * 100 + 0.5)) or "")
+    end
+    local col = M.color_of(top.r, top.g, top.b)
+    publish(function_for(ev, "color"), col.value, ts, col.text .. ": " .. table.concat(parts, ", "))
+  end
+  if x.ppe and enabled("ppe") then
+    if x.ppe.helmet ~= nil then publish(function_for(ev, "helmet"), x.ppe.helmet and 1 or 0, ts, x.ppe.helmet_type) end
+    if x.ppe.vest ~= nil then publish(function_for(ev, "vest"), x.ppe.vest and 1 or 0, ts, x.class) end
+  end
+  if plate then
+    local parts = { plate.number, plate.country }
+    local car = table.concat({ plate.brand or "", plate.model or "" }, " "):gsub("^%s+", ""):gsub("%s+$", "")
+    if car ~= "" then parts[#parts + 1] = car end
+    if plate.likelihood then parts[#parts + 1] = string.format("%d %%", math.floor(plate.likelihood * 100 + 0.5)) end
+    publish(function_for(ev, "plate"), 1, ts, table.concat(parts, " "))
   end
   if enabled("extra") then
     for _, e in ipairs(x.extra) do publish(function_for(ev, e.path), e.value, ts, x.class) end
